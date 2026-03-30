@@ -2,8 +2,6 @@ name: Auto PR develop → main
 
 on:
   workflow_run:
-    workflows: ["Deploy to GKE (staging)"]
-    types: [completed]
     branches: [develop]
 
 jobs:
