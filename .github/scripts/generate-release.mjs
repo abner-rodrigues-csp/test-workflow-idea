@@ -418,10 +418,7 @@ function generateBody(prs, envsByKey, sqlByPr) {
 
     const releaseDetails = generateBody(prs, envsByKey, sqlByPr);
     const prBody = [
-      '## Release to Production\n',
-      '### Checklist\n',
-      '- [ ] Ambiente de staging validado',
-      '- [ ] Sem issues bloqueantes\n',
+      '## Release para Produção\n',
       '> PR gerado automaticamente após deploy em staging com sucesso.\n',
       '---\n',
       releaseDetails,
