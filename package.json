@@ -1,0 +1,8 @@
+{
+  "name": "test-workflow-idea",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://github.com/abner-rodrigues-csp/test-workflow-idea.git",
+  "author": "Abner <abner.rodrigues@csptech.com.br>",
+  "license": "MIT"
+}
