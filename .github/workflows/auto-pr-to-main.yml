@@ -2,7 +2,11 @@ name: Auto PR develop → main
 
 on:
   workflow_run:
-    branches: [develop]
+    workflows: ["CI"] 
+        types:
+          - completed
+        branches:
+          - develop
 
 jobs:
   create-pr:
