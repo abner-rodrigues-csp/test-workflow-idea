@@ -1,0 +1,64 @@
+name: Auto PR develop → main
+
+on:
+  workflow_run:
+    workflows: ["Deploy to GKE (staging)"]
+    types: [completed]
+    branches: [develop]
+
+jobs:
+  create-pr:
+    name: Create PR to main
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Bump version on develop
+        id: bump
+        run: node .github/scripts/generate-release.mjs --bump-only
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create or update PR develop → main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_TAG: ${{ steps.bump.outputs.next_tag }}
+        run: |
+          PR_TITLE="release: ${NEXT_TAG} — develop → main"
+
+          EXISTING_PR=$(gh pr list \
+            --base main \
+            --head develop \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Updating PR #$EXISTING_PR"
+            gh pr edit "$EXISTING_PR" \
+              --title "$PR_TITLE" \
+              --body-file /tmp/pr-body.md
+          else
+            gh pr create \
+              --base main \
+              --head develop \
+              --title "$PR_TITLE" \
+              --body-file /tmp/pr-body.md
+          fi

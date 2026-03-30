@@ -1,0 +1,45 @@
+name: Controle de Ambiente de Homologação
+
+on:
+  pull_request:
+    branches:
+      - develop
+
+jobs:
+  control_homol_environment:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2 # Adicione esta etapa para clonar o repositório Git
+
+      - name: Check PR source branch
+        run: |
+          PR_BRANCH=$(echo ${{ github.event.pull_request.head.ref }})
+          TEAM=$(echo $PR_BRANCH | cut -d'/' -f 2)
+          echo "Team: $TEAM"
+          if [[ $TEAM == "command-q" ]]; then
+            echo "This PR is from Command-Q."
+
+            # Verifique se a label "aberto-command-q" existe
+            LABEL_EXISTS=$(gh api repos/${{ github.repository }}/labels/aberto-command-q --silent 2>/dev/null || true)
+            if [ -n "$LABEL_EXISTS" ]; then
+              echo "Environment is open for this PR."
+            else
+              echo "Environment is not open for this PR."
+              exit 1
+            fi
+          elif [[ $TEAM == "the-keepers" ]]; then
+            echo "This PR is from The Keepers."
+
+            # Verifique se a label "aberto-the-keepers" existe
+            LABEL_EXISTS=$(gh api repos/${{ github.repository }}/labels/aberto-the-keepers --silent 2>/dev/null || true)
+            if [ -n "$LABEL_EXISTS" ]; then
+              echo "Environment is open for this PR."
+            else
+              echo "Environment is not open for this PR."
+              exit 1
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
