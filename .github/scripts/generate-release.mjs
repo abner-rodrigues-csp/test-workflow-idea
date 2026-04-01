@@ -98,8 +98,8 @@ function parseEnvsFromBody(body) {
 
     const trimmed = line.trim();
 
-    // Linha "- Valor: ..." resolve a chave pendente
-    if (pending && /^\s*-\s*Valor:/i.test(line)) {
+    // Linha "- Valor: ..." ou "* Valor: ..." resolve a chave pendente
+    if (pending && /^\s*[-*]\s*Valor:/i.test(line)) {
       const v = line
         .split(':')
         .slice(1)
@@ -113,7 +113,7 @@ function parseEnvsFromBody(body) {
       continue;
     }
 
-    if (trimmed.startsWith('- ')) {
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       pending = null; // nova bullet reseta o pending anterior
       let t = trimmed.slice(2).trim();
       if (t.startsWith('`') && t.endsWith('`')) {
@@ -418,10 +418,7 @@ function generateBody(prs, envsByKey, sqlByPr) {
 
     const releaseDetails = generateBody(prs, envsByKey, sqlByPr);
     const prBody = [
-      '## Release to Production\n',
-      '### Checklist\n',
-      '- [ ] Ambiente de staging validado',
-      '- [ ] Sem issues bloqueantes\n',
+      '## Release para Produção\n',
       '> PR gerado automaticamente após deploy em staging com sucesso.\n',
       '---\n',
       releaseDetails,
