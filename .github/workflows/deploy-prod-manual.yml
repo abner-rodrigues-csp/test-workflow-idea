@@ -1,0 +1,98 @@
+name: Deploy to Argo (production) - Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag ou SHA para deploy'
+        required: true
+        default: 'main'
+      environment:
+        description: 'Ambiente de destino'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+
+jobs:
+  build-and-push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.get-sha.outputs.sha }}
+    steps:
+      - name: Checkout ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+
+      - name: Get commit SHA
+        id: get-sha
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn --frozen-lockfile
+
+      - name: Authenticate to Google Cloud (Service Account JSON)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GKE_SA_KEY_BUREAU }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud --quiet auth configure-docker us-docker.pkg.dev
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            --tag "us-docker.pkg.dev/${{ secrets.GKE_PROJECT_BUREAU }}/gcr.io/${{ secrets.GKE_IMAGE }}:${{ steps.get-sha.outputs.sha }}" \
+            --build-arg GITHUB_SHA="${{ steps.get-sha.outputs.sha }}" \
+            --build-arg GITHUB_REF="${{ github.event.inputs.ref }}" \
+            .
+
+      - name: Publish Image to Registry
+        run: |
+          docker push "us-docker.pkg.dev/${{ secrets.GKE_PROJECT_BUREAU }}/gcr.io/${{ secrets.GKE_IMAGE }}:${{ steps.get-sha.outputs.sha }}"
+
+  update-argo:
+    name: Update Argo Manifests
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout kubernetes manifests repo
+        uses: actions/checkout@v4
+        with:
+          repository: Idea-Maker/kubernetes
+          token: ${{ secrets.TOKEN_COMMIT }}
+
+      - name: Update image version and commit
+        run: |
+          sed -i "s/version.*/version: \"${{ needs.build-and-push.outputs.sha }}\"/" helm-bureau/backoffice-backend/config/prod.yaml
+          git config user.name git-ideamaker
+          git config user.email joao-gabriel@ideamaker.com.br
+          git add .
+          git commit -m "chore: deploy prod ${{ needs.build-and-push.outputs.sha }} (manual by ${{ github.actor }})"
+          git push
+
+  notify:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    needs: [build-and-push, update-argo]
+    if: always()
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2.1.0
+        env:
+          SLACK_CHANNEL: ci-cd
+          SLACK_COLOR: ${{ contains(needs.*.result, 'failure') && '#ff0000' || '#008000' }}
+          SLACK_TITLE: 'Application Deploy (Manual)'
+          SLACK_MESSAGE: ${{ contains(needs.*.result, 'failure') && format('Deploy manual de {0}/{1} para prod falhou :surrender: (disparado por {2})', github.server_url, github.repository, github.actor) || format('Deploy manual de {0}/{1} para prod concluído :rocket: (disparado por {2}, ref: {3})', github.server_url, github.repository, github.actor, github.event.inputs.ref) }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_FOOTER: 'Github Actions'
