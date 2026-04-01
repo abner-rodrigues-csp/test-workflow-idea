@@ -93,6 +93,6 @@ jobs:
           SLACK_CHANNEL: ci-cd
           SLACK_COLOR: ${{ contains(needs.*.result, 'failure') && '#ff0000' || '#008000' }}
           SLACK_TITLE: 'Application Deploy (Manual)'
-          SLACK_MESSAGE: ${{ contains(needs.*.result, 'failure') && format('Deploy manual de {0}/{1} para prod falhou :surrender: (disparado por {2})', github.server_url, github.repository, github.actor) || format('Deploy manual de {0}/{1} para prod concluído :rocket: (disparado por {2}, ref: {3})', github.server_url, github.repository, github.actor, github.event.inputs.ref) }}
+          SLACK_MESSAGE: "${{ contains(needs.*.result, 'failure') && format('Deploy manual de {0}/{1} para prod falhou :surrender: (disparado por {2})', github.server_url, github.repository, github.actor) || format('Deploy manual de {0}/{1} para prod concluído :rocket: (disparado por {2}, ref: {3})', github.server_url, github.repository, github.actor, github.event.inputs.ref) }}"
           SLACK_WEBHOOK: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_FOOTER: 'Github Actions'
