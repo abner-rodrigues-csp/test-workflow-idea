@@ -4,9 +4,8 @@
 /**
  * generate-release.mjs
  *
- * Coleta as PRs mergeadas desde o último release, extrai ENVs e SQL
- * dos bodies, detecta o bump de versão (semver) e cria o GitHub Release
- * com um body rico — mesma lógica do idea-release-cli, mas automatizado.
+ * Coleta as PRs mergeadas desde o último release, detecta o bump de versão
+ * (semver) e cria o GitHub Release usando geração automática de notas.
  */
 
 import { execSync } from 'node:child_process';
@@ -443,26 +442,6 @@ function generateBody(prs, envsByKey, sqlByPr) {
     );
   } catch {}
 
-  // Extrair ENVs e SQL das PRs
-  const envsByKey = new Map();
-  const sqlByPr = new Map();
-  for (const pr of prs) {
-    const body = pr.body || '';
-    for (const { key, value } of parseEnvsFromBody(body)) {
-      if (!envsByKey.has(key)) {
-        envsByKey.set(key, new Set());
-      }
-      envsByKey.get(key).add(value ?? '');
-    }
-    const sql = parseSqlFromBody(body);
-    if (sql.length) {
-      sqlByPr.set(pr.number, sql);
-    }
-  }
-
-  // Gerar body do release
-  const releaseBody = generateBody(prs, envsByKey, sqlByPr);
-
   // Atualizar versão no package.json
   const pkgPath = resolve(process.cwd(), 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
@@ -470,10 +449,6 @@ function generateBody(prs, envsByKey, sqlByPr) {
   console.log(`\n📝 package.json → ${pkg.version}`);
 
   if (DRY_RUN) {
-    console.log('\n─────────────────────────────────────────');
-    console.log('📋 RELEASE BODY PREVIEW:\n');
-    console.log(releaseBody);
-    console.log('─────────────────────────────────────────');
     console.log('\n✅ Dry run concluído. Nenhuma alteração foi feita.');
     return;
   }
@@ -513,10 +488,6 @@ function generateBody(prs, envsByKey, sqlByPr) {
     );
   }
 
-  // Criar GitHub Release com body rico com retry logic
-  const bodyFile = '/tmp/release-body.md';
-  writeFileSync(bodyFile, releaseBody, 'utf-8');
-
   async function publishRelease() {
     const maxRetries = 3;
     let attempt = 0;
@@ -546,8 +517,7 @@ function generateBody(prs, envsByKey, sqlByPr) {
           repo,
           '--title',
           `Release ${nextTag}`,
-          '--notes-file',
-          bodyFile,
+          '--generate-notes',
         );
 
         console.log(`\n✅ Release ${nextTag} criado com sucesso!`);
