@@ -12,11 +12,15 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
-if (DRY_RUN) console.log('🧪 DRY RUN — nenhuma alteração será feita no repositório.\n');
+const DRY_RUN =
+  process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
+if (DRY_RUN)
+  console.log('🧪 DRY RUN — nenhuma alteração será feita no repositório.\n');
 
-const BUMP_ONLY = process.argv.includes('--bump-only') || process.env.BUMP_ONLY === 'true';
-if (BUMP_ONLY) console.log('🔖 BUMP ONLY — apenas versão será bumped no develop.\n');
+const BUMP_ONLY =
+  process.argv.includes('--bump-only') || process.env.BUMP_ONLY === 'true';
+if (BUMP_ONLY)
+  console.log('🔖 BUMP ONLY — apenas versão será bumped no develop.\n');
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,7 +45,54 @@ function ghJson(...args) {
   return JSON.parse(gh(...args));
 }
 
-// ── parsers (port de idea-release-cli) ───────────────────────────────────────
+/**
+ * Helper to determine if an error is transient (should be retried)
+ */
+function isTransientError(err) {
+  const msg = err.message || String(err);
+  // Network errors, rate limits, 5xx errors are transient
+  return (
+    /ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(msg) ||
+    /429|500|502|503|504/i.test(msg) ||
+    /rate limit/i.test(msg)
+  );
+}
+
+/**
+ * Helper to check if error is a 404 (not found)
+ */
+function is404Error(err) {
+  const msg = err.message || String(err);
+  return /404|not found/i.test(msg);
+}
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function retryWithBackoff(fn, maxRetries = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (!isTransientError(err) || attempt === maxRetries - 1) {
+        throw err;
+      }
+      const delay = Math.pow(2, attempt + 1) * 1000;
+      console.warn(
+        `⚠️  Transient error (attempt ${
+          attempt + 1
+        }/${maxRetries}), retrying in ${delay}ms...`,
+        err.message,
+      );
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
+// ── parsers ───────────────────────────────────────────────────────────────────
 
 // Palavras que indicam "sem valor" nos bodies das PRs
 const PLACEHOLDERS = new Set([
@@ -202,7 +253,7 @@ function fmtVer(v) {
 
 function getLastTag() {
   try {
-    const tags = exec("git tag --list 'v*' --sort=-v:refname")
+    const tags = exec("git tag --merged HEAD --list 'v*' --sort=-v:refname")
       .split('\n')
       .filter(Boolean);
     return tags[0] || null;
@@ -242,7 +293,14 @@ function collectPrNumbers(repo, lastTag) {
   }
 
   // PRs via GitHub API (associação commit → PR)
-  for (const { sha } of commits.slice(0, 100)) {
+  if (commits.length > 100) {
+    throw new Error(
+      `Há ${commits.length} commits desde ${
+        lastTag ?? 'o início'
+      }; a coleta de PRs não pode ser truncada.`,
+    );
+  }
+  for (const { sha } of commits) {
     try {
       const pulls = ghJson(
         'api',
@@ -253,7 +311,26 @@ function collectPrNumbers(repo, lastTag) {
       for (const p of pulls || []) {
         prNums.add(Number(p.number));
       }
-    } catch {}
+    } catch (err) {
+      const errMsg = err.message || String(err);
+      // 404 or "not found" is expected when commit has no PRs
+      if (is404Error(err)) {
+        console.debug(`ℹ️  Commit ${sha} has no associated PRs (404).`);
+        continue;
+      }
+      // For other errors, check if transient
+      if (isTransientError(err)) {
+        console.warn(
+          `⚠️  Transient error fetching PRs for commit ${sha}, skipping this commit: ${errMsg}`,
+        );
+        continue;
+      }
+      // Unexpected error - fail fast
+      console.error(
+        `❌ Unexpected error fetching PRs for commit ${sha}: ${errMsg}`,
+      );
+      throw err;
+    }
   }
 
   return [...prNums].sort((a, b) => a - b);
@@ -370,7 +447,24 @@ function generateBody(prs, envsByKey, sqlByPr) {
       if (!/^release(?=\s|:|$)/i.test(pr.title || '')) {
         prs.push(pr);
       }
-    } catch {}
+    } catch (err) {
+      const errMsg = err.message || String(err);
+      // 404 is expected for PRs that no longer exist or are not accessible
+      if (is404Error(err)) {
+        console.warn(`⚠️  PR #${n} not found (404), skipping.`);
+        continue;
+      }
+      // Check if it's a transient error
+      if (isTransientError(err)) {
+        console.warn(
+          `⚠️  Transient error fetching PR #${n}, skipping this PR: ${errMsg}`,
+        );
+        continue;
+      }
+      // Unexpected error - fail fast
+      console.error(`❌ Unexpected error fetching PR #${n}: ${errMsg}`);
+      throw err;
+    }
   }
 
   if (prs.length === 0) {
@@ -399,8 +493,16 @@ function generateBody(prs, envsByKey, sqlByPr) {
     console.log(`📝 package.json → ${pkg.version}`);
 
     exec('git config user.name "github-actions[bot]"');
-    exec('git config user.email "github-actions[bot]@users.noreply.github.com"');
+    exec(
+      'git config user.email "github-actions[bot]@users.noreply.github.com"',
+    );
     exec('git add package.json');
+    try {
+      exec('git diff --quiet --exit-code --staged');
+    } catch {
+      exec(`git commit -m "chore(release): bump version to ${pkg.version}"`);
+      exec('git push');
+    }
 
     // Extrair ENVs e SQL e gerar body rico para o PR develop → main
     const envsByKey = new Map();
@@ -470,12 +572,8 @@ function generateBody(prs, envsByKey, sqlByPr) {
     } catch {
       // Há mudanças staged, pode fazer commit
       exec(`git commit -m "[CI-CD] chore(release): ${nextTag} [skip ci]"`);
-      try {
-        exec('git push origin HEAD:main');
-        console.log('⬆️  Version bump pushed');
-      } catch (pushErr) {
-        console.warn('⚠️  Não foi possível fazer push do version bump (branch protection ativa). Continuando com a criação da tag e release...');
-      }
+      exec('git push origin HEAD:main');
+      console.log('⬆️  Version bump pushed');
     }
 
     // Criar e subir tag
@@ -496,7 +594,9 @@ function generateBody(prs, envsByKey, sqlByPr) {
     while (attempt < maxRetries) {
       try {
         console.log(
-          `\n📤 Tentando publicar release ${nextTag}... (tentativa ${attempt + 1}/${maxRetries})`,
+          `\n📤 Tentando publicar release ${nextTag}... (tentativa ${
+            attempt + 1
+          }/${maxRetries})`,
         );
 
         // Tentar deletar release existente se tag já existe

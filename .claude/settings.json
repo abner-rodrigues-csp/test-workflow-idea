@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/abnercsp/csptech-projects/backoffice-backend/**)",
+      "Read(//home/abnercsp/csptech-projects/backoffice-backend/.github/**)",
+      "Bash(git -C /home/abnercsp/csptech-projects/backoffice-backend remote get-url origin)"
+    ],
+    "additionalDirectories": [
+      "/home/abnercsp/csptech-projects/backoffice-backend/.github"
+    ]
+  }
+}
