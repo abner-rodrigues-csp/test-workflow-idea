@@ -501,7 +501,7 @@ function generateBody(prs, envsByKey, sqlByPr) {
       exec('git diff --quiet --exit-code --staged');
     } catch {
       exec(`git commit -m "chore(release): bump version to ${pkg.version}"`);
-      exec('git push');
+      exec('git push origin HEAD:develop');
     }
 
     // Extrair ENVs e SQL e gerar body rico para o PR develop → main
