@@ -20,7 +20,7 @@ jobs:
       - name: Checkout develop
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: develop
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -41,6 +41,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT_TAG: ${{ steps.bump.outputs.next_tag }}
         run: |
+          if [ -z "$NEXT_TAG" ]; then
+            echo "⚠️ Nenhuma versão nova detectada. Pulando criação de PR."
+            exit 0
+          fi
+
           PR_TITLE="release: ${NEXT_TAG}"
 
           EXISTING_PR=$(gh pr list \
